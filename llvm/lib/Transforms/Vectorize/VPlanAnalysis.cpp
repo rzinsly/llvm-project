@@ -301,7 +301,8 @@ Type *VPTypeAnalysis::inferScalarType(const VPValue *V) {
               [](const auto *R) { return R->getScalarType(); })
           .Case<VPReductionRecipe, VPPredInstPHIRecipe, VPWidenPHIRecipe,
                 VPScalarIVStepsRecipe, VPWidenGEPRecipe, VPVectorPointerRecipe,
-                VPVectorEndPointerRecipe, VPWidenCanonicalIVRecipe>(
+                VPVectorEndPointerRecipe, VPWidenCanonicalIVRecipe,
+                VPScalarIVPromotionRecipe>(
               [this](const VPRecipeBase *R) {
                 return inferScalarType(R->getOperand(0));
               })

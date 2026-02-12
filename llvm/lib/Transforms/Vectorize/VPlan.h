@@ -429,6 +429,7 @@ public:
     VPWidenSC,
     VPBlendSC,
     VPHistogramSC,
+    VPScalarIVPromotionRecipeSC,
     // START: Phi-like recipes. Need to be kept together.
     VPWidenPHISC,
     VPPredInstPHISC,
@@ -623,6 +624,7 @@ public:
     case VPRecipeBase::VPWidenIntOrFpInductionSC:
     case VPRecipeBase::VPWidenPointerInductionSC:
     case VPRecipeBase::VPReductionPHISC:
+    case VPRecipeBase::VPScalarIVPromotionRecipeSC:
       return true;
     case VPRecipeBase::VPBranchOnMaskSC:
     case VPRecipeBase::VPInterleaveEVLSC:
@@ -3748,6 +3750,54 @@ protected:
   void printRecipe(raw_ostream &O, const Twine &Indent,
                    VPSlotTracker &SlotTracker) const override;
 #endif
+};
+
+struct LLVM_ABI_FOR_TEST VPScalarIVPromotionRecipe : public VPSingleDefRecipe {
+  VPScalarIVPromotionRecipe(std::initializer_list<VPValue *> Operands,
+                            DebugLoc DL = DebugLoc::getUnknown())
+      : VPSingleDefRecipe(VPRecipeBase::VPScalarIVPromotionRecipeSC, Operands, DL) {}
+
+  VP_CLASSOF_IMPL(VPRecipeBase::VPScalarIVPromotionRecipeSC)
+
+  bool isSingleScalar() const { return true; }
+
+  VPScalarIVPromotionRecipe *clone() override {
+    assert(getNumOperands() == 3 || getNumOperands() == 4);
+    if (getNumOperands() == 3)
+      return new VPScalarIVPromotionRecipe(
+          {getOperand(0), getOperand(1), getOperand(2)}, getDebugLoc());
+    return new VPScalarIVPromotionRecipe(
+        {getOperand(0), getOperand(1), getOperand(2), getOperand(3)},
+        getDebugLoc());
+  }
+
+  VPValue *getVFxUF() { return getOperand(3); }
+  void setVFxUF(VPValue *V) {
+    if (getNumOperands() == 3) {
+      addOperand(V);
+    } else {
+      setOperand(3, V);
+    }
+  }
+
+  void execute(VPTransformState &State) override;
+
+  InstructionCost computeCost(ElementCount VF,
+                              VPCostContext &Ctx) const override {
+    return 0;
+  }
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  /// Print the recipe.
+  void printRecipe(raw_ostream &O, const Twine &Indent,
+                   VPSlotTracker &SlotTracker) const override;
+#endif
+
+  bool usesScalars(const VPValue *Op) const override {
+    assert(is_contained(operands(), Op) &&
+           "Op must be an operand of the recipe");
+    return true;
+  }
 };
 
 /// Canonical scalar induction phi of the vector loop. Starting at the specified

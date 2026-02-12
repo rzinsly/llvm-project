@@ -4122,6 +4122,7 @@ static bool willGenerateVectors(VPlan &Plan, ElementCount VF,
       case VPRecipeBase::VPExpandSCEVSC:
       case VPRecipeBase::VPPredInstPHISC:
       case VPRecipeBase::VPBranchOnMaskSC:
+      case VPRecipeBase::VPScalarIVPromotionRecipeSC:
         continue;
       case VPRecipeBase::VPReductionSC:
       case VPRecipeBase::VPActiveLaneMaskPHISC:
@@ -8264,7 +8265,8 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
     for (VPRecipeBase &R : make_early_inc_range(
              make_range(VPBB->getFirstNonPhi(), VPBB->end()))) {
       // Skip recipes that do not need transforming.
-      if (isa<VPWidenCanonicalIVRecipe, VPBlendRecipe, VPReductionRecipe>(&R))
+      if (isa<VPWidenCanonicalIVRecipe, VPBlendRecipe, VPReductionRecipe,
+              VPScalarIVPromotionRecipe>(&R))
         continue;
       auto *VPI = cast<VPInstruction>(&R);
       if (!VPI->getUnderlyingValue())

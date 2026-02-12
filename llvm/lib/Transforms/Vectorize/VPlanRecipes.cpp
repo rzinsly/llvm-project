@@ -1638,6 +1638,39 @@ void VPPhi::execute(VPTransformState &State) {
   State.set(this, NewPhi, VPLane(0));
 }
 
+void VPScalarIVPromotionRecipe::execute(VPTransformState &State) {
+  auto &Builder = State.Builder;
+  State.setDebugLocFrom(getDebugLoc());
+
+  Value *VL = State.get(getVFxUF(), VPLane(0));
+  Type *Ty = State.get(getOperand(0), VPLane(0))->getType();
+  VL = Builder.CreateZExtOrTrunc(VL, Ty);
+
+  auto PhiInsertPoint =
+      State.CFG.VPBB2IRBB[getParent()->getExitingBasicBlock()]
+          ->getFirstNonPHIIt();
+  auto DefaultInsertPoint = State.Builder.GetInsertPoint();
+
+  State.Builder.SetInsertPoint(PhiInsertPoint);
+  auto Phi = Builder.CreatePHI(State.TypeAnalysis.inferScalarType(this), 2, "");
+  State.Builder.SetInsertPoint(DefaultInsertPoint);
+  auto EntryValue = State.get(getOperand(0), VPLane(0));
+  VPBlockBase *Pred = getParent()->getPredecessors()[0];
+  auto *PredVPBB = Pred->getExitingBasicBlock();
+  Phi->addIncoming(EntryValue, State.CFG.VPBB2IRBB[PredVPBB]);
+
+  auto SCEVStep = State.get(getOperand(1), VPLane(0));
+  SCEVStep = Builder.CreateZExtOrTrunc(SCEVStep, Ty);
+
+  auto Mul = Builder.CreateNAryOp(Instruction::Mul, {SCEVStep, VL});
+  auto Add = Builder.CreateNAryOp(Instruction::Add, {Phi, Mul});
+
+  auto Pointer = State.get(getOperand(2), VPLane(0));
+  Builder.CreateStore(Add, Pointer);
+
+  Phi->addIncoming(Add, dyn_cast<Instruction>(Add)->getParent());
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void VPPhi::printRecipe(raw_ostream &O, const Twine &Indent,
                         VPSlotTracker &SlotTracker) const {
@@ -1646,6 +1679,19 @@ void VPPhi::printRecipe(raw_ostream &O, const Twine &Indent,
   O << " = phi";
   printFlags(O);
   printPhiOperands(O, SlotTracker);
+}
+
+void VPScalarIVPromotionRecipe::printRecipe(raw_ostream &O, const Twine &Indent,
+                                            VPSlotTracker &SlotTracker) const {
+  O << Indent << "EMIT" << (isSingleScalar() ? "-SCALAR" : "") << " ";
+  printAsOperand(O, SlotTracker);
+  O << " = Scalar Promotion IV ";
+  printOperands(O, SlotTracker);
+
+  if (auto DL = getDebugLoc()) {
+    O << ", !dbg ";
+    DL.print(O);
+  }
 }
 #endif
 

@@ -3111,14 +3111,16 @@ static void fixupVFUsersForEVL(VPlan &Plan, VPValue &EVL) {
                   return match(U,
                                m_c_Add(m_Specific(LoopRegion->getCanonicalIV()),
                                        m_Specific(&Plan.getVFxUF()))) ||
-                         isa<VPWidenPointerInductionRecipe>(U);
+                         isa<VPWidenPointerInductionRecipe>(U) ||
+                         isa<VPScalarIVPromotionRecipe>(U);
                 }) &&
          "Only users of VFxUF should be VPWidenPointerInductionRecipe and the "
          "increment of the canonical induction.");
   Plan.getVFxUF().replaceUsesWithIf(&EVL, [](VPUser &U, unsigned Idx) {
     // Only replace uses in VPWidenPointerInductionRecipe; The increment of the
     // canonical induction must not be updated.
-    return isa<VPWidenPointerInductionRecipe>(U);
+    return isa<VPWidenPointerInductionRecipe>(U) ||
+           isa<VPScalarIVPromotionRecipe>(U);
   });
 
   // Create a scalar phi to track the previous EVL if fixed-order recurrence is
