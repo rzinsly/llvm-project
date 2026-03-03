@@ -8157,6 +8157,23 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
   }
 }
 
+void LoopVectorizationPlanner::adjustScalarIVPromotions(VPlanPtr &Plan) {
+  VPScalarIVPromotionRecipe *Recipe = nullptr;
+
+  for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(
+           vp_depth_first_deep(Plan->getVectorLoopRegion())))
+    for (VPRecipeBase &R : *VPBB)
+      if (auto *ScalarIV = dyn_cast<VPScalarIVPromotionRecipe>(&R)) {
+        assert(!Recipe && "Only one FFLoad is supported");
+        Recipe = ScalarIV;
+      }
+
+  if (!Recipe)
+    return;
+
+  Recipe->setVFxUF(&Plan->getVFxUF());
+}
+
 VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
     VPlanPtr Plan, VFRange &Range, LoopVersioning *LVer) {
 
@@ -8342,6 +8359,8 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlanWithVPRecipes(
   // Optimize FindIV reductions to use sentinel-based approach when possible.
   RUN_VPLAN_PASS(VPlanTransforms::optimizeFindIVReductions, *Plan, PSE,
                  *OrigLoop);
+
+  adjustScalarIVPromotions(Plan);
 
   // Apply mandatory transformation to handle reductions with multiple in-loop
   // uses if possible, bail out otherwise.
