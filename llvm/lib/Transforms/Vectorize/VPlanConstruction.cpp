@@ -1181,7 +1181,9 @@ void VPlanTransforms::addMinimumIterationCheck(
                                     TripCount, Step)) {
       // Generate the minimum iteration check only if we cannot prove the
       // check is known to be true, or known to be false.
-      VPValue *MinTripCountVPV = Builder.createExpandSCEV(Step);
+      VPValue *MinTripCountVPV =
+          VPBuilder(EntryVPBB, EntryVPBB->getFirstNonPhi())
+              .createExpandSCEV(Step);
       TripCountCheck = Builder.createICmp(
           CmpPred, TripCountVPV, MinTripCountVPV, DL, "min.iters.check");
     } // else step known to be < trip count, use TripCountCheck preset to false.
@@ -1203,8 +1205,11 @@ void VPlanTransforms::addMinimumVectorEpilogueIterationCheck(
   // Add the minimum iteration check for the epilogue vector loop.
   VPValue *TC = Plan.getOrAddLiveIn(TripCount);
   VPBuilder Builder(cast<VPBasicBlock>(Plan.getEntry()));
-  VPValue *VFxUF = Builder.createExpandSCEV(SE.getElementCount(
-      TripCount->getType(), (EpilogueVF * EpilogueUF), SCEV::FlagNUW));
+  VPValue *VFxUF =
+      VPBuilder(cast<VPBasicBlock>(Plan.getEntry()),
+                cast<VPBasicBlock>(Plan.getEntry())->getFirstNonPhi())
+          .createExpandSCEV(SE.getElementCount(
+              TripCount->getType(), (EpilogueVF * EpilogueUF), SCEV::FlagNUW));
   VPValue *Count = Builder.createSub(TC, Plan.getOrAddLiveIn(VectorTripCount),
                                      DebugLoc::getUnknown(), "n.vec.remaining");
 
