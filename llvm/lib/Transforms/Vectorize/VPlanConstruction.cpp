@@ -303,6 +303,46 @@ void PlainCFGBuilder::createVPInstructionsForVPBB(VPBasicBlock *VPBB,
           MD.setMetadata(LLVMContext::MD_noalias, NoAliasMD);
       }
 
+      auto skip = false;
+      for (auto &SP : ScalarPromotions) {
+        if (Inst == SP.Load) {
+          VPBasicBlock *PreheaderVPBB =
+              Plan->getVectorPreheader(); // vector preheader, not the IR loop
+                                          // preheader
+          if (!PreheaderVPBB)
+            PreheaderVPBB = Plan->getEntry();
+
+          SmallVector<VPValue *, 4> VPOperands;
+          for (Value *Op : SP.Load->operands()) {
+            VPOperands.push_back(getOrCreateVPOperand(Op));
+          }
+          auto *Load = new VPReplicateRecipe(SP.Load, VPOperands,
+                                             /*IsSingleScalar=*/true);
+          auto SCEVRecipe = new VPExpandSCEVRecipe(SP.Step);
+          PreheaderVPBB->appendRecipe(SCEVRecipe);
+          PreheaderVPBB->appendRecipe(Load);
+
+          auto StepValue = SCEVRecipe->getVPSingleValue();
+
+          NewR = new VPScalarIVPromotionRecipe(
+              {Load, StepValue,
+               getOrCreateVPOperand(SP.Store->getPointerOperand())},
+              SP.Load->getDebugLoc());
+          VPBB->appendRecipe(NewR);
+          skip = true;
+          break;
+        } else if (Inst == SP.Store) {
+          skip = true;
+          break;
+        } else if (Inst == SP.Instructions[0]) {
+          skip = true;
+          break;
+        }
+      }
+
+      if (skip)
+        continue;
+
       // Translate LLVM-IR operands into VPValue operands and set them in the
       // new VPInstruction.
       SmallVector<VPValue *, 4> VPOperands;
