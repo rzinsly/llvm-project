@@ -35,6 +35,7 @@ class TargetLibraryInfo;
 class TargetTransformInfo;
 class VPBuilder;
 class VPRecipeBuilder;
+class MemorySSA;
 struct VFRange;
 
 LLVM_ABI_FOR_TEST extern cl::opt<bool> VerifyEachVPlan;
@@ -130,7 +131,7 @@ struct VPlanTransforms {
   LLVM_ABI_FOR_TEST static std::unique_ptr<VPlan>
   buildVPlan0(Loop *TheLoop, LoopInfo &LI, Type *InductionTy, DebugLoc IVDL,
               PredicatedScalarEvolution &PSE, LoopAccessInfoManager *LAIs,
-              LoopVersioning *LVer = nullptr);
+              AAResults *AA, MemorySSA *MSSA, LoopVersioning *LVer = nullptr);
 
   /// Replace VPPhi recipes in \p Plan's header with corresponding
   /// VPHeaderPHIRecipe subclasses for inductions, reductions, and

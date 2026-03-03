@@ -45,6 +45,7 @@ class OptimizationRemarkEmitter;
 class TargetTransformInfo;
 class TargetLibraryInfo;
 class VPRecipeBuilder;
+class MemorySSA;
 struct VFRange;
 
 extern cl::opt<bool> EnableVPlanNativePath;
@@ -515,6 +516,9 @@ class LoopVectorizationPlanner {
 
   OptimizationRemarkEmitter *ORE;
 
+  AAResults *AA;
+  MemorySSA *MSSA;
+
   SmallVector<VPlanPtr, 4> VPlans;
 
   /// Profitable vector factors.
@@ -545,9 +549,10 @@ public:
       const TargetTransformInfo &TTI, LoopVectorizationLegality *Legal,
       LoopVectorizationCostModel &CM, InterleavedAccessInfo &IAI,
       PredicatedScalarEvolution &PSE, LoopAccessInfoManager *LAIs,
-      const LoopVectorizeHints &Hints, OptimizationRemarkEmitter *ORE)
+      const LoopVectorizeHints &Hints, OptimizationRemarkEmitter *ORE,
+      AAResults *AA, MemorySSA *MSSA)
       : OrigLoop(L), LI(LI), DT(DT), TLI(TLI), TTI(TTI), Legal(Legal), CM(CM),
-        IAI(IAI), PSE(PSE), LAIs(LAIs), Hints(Hints), ORE(ORE) {}
+        IAI(IAI), PSE(PSE), LAIs(LAIs), Hints(Hints), ORE(ORE), AA(AA), MSSA(MSSA) {}
 
   /// Build VPlans for the specified \p UserVF and \p UserIC if they are
   /// non-zero or all applicable candidate VFs otherwise. If vectorization and

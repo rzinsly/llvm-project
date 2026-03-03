@@ -3112,7 +3112,7 @@ LoopAccessInfo::LoopAccessInfo(Loop *L, ScalarEvolution *SE,
         TTI->getRegisterBitWidth(TargetTransformInfo::RGK_FixedWidthVector) * 2;
 
   DepChecker = std::make_unique<MemoryDepChecker>(
-      *PSE, AC, DT, L, SymbolicStrides, MaxTargetVectorWidthInBits, LoopGuards);
+      *PSE, AC, DT, AA, L, SymbolicStrides, MaxTargetVectorWidthInBits, LoopGuards);
   PtrRtChecking =
       std::make_unique<RuntimePointerChecking>(*DepChecker, SE, LoopGuards);
   if (canAnalyzeLoop())

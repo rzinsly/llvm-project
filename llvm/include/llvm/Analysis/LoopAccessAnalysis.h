@@ -181,11 +181,11 @@ public:
   };
 
   MemoryDepChecker(PredicatedScalarEvolution &PSE, AssumptionCache *AC,
-                   DominatorTree *DT, const Loop *L,
+                   DominatorTree *DT, AAResults *AA, const Loop *L,
                    const DenseMap<Value *, const SCEV *> &SymbolicStrides,
                    unsigned MaxTargetVectorWidthInBits,
                    std::optional<ScalarEvolution::LoopGuards> &LoopGuards)
-      : PSE(PSE), AC(AC), DT(DT), InnermostLoop(L),
+      : PSE(PSE), AC(AC), DT(DT), AA(AA), InnermostLoop(L),
         SymbolicStrides(SymbolicStrides),
         MaxTargetVectorWidthInBits(MaxTargetVectorWidthInBits),
         LoopGuards(LoopGuards) {}
@@ -312,6 +312,7 @@ private:
 
   AssumptionCache *AC;
   DominatorTree *DT;
+  AAResults *AA;
 
   const Loop *InnermostLoop;
 
