@@ -76,6 +76,7 @@ class LoopInfo;
 class OptimizationRemarkEmitter;
 class ProfileSummaryInfo;
 class ScalarEvolution;
+class SCEV;
 class TargetLibraryInfo;
 class TargetTransformInfo;
 

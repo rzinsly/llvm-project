@@ -9997,3 +9997,92 @@ void LoopVectorizePass::printPipeline(
   OS << (VectorizeOnlyWhenForced ? "" : "no-") << "vectorize-forced-only;";
   OS << '>';
 }
+
+namespace {
+/// Collects all subexpressions that appear within a given SCEV tree.
+struct SCEVSubexprCollector : public SCEVVisitor<SCEVSubexprCollector, void> {
+  SmallPtrSet<const SCEV *, 4> &Subs;
+  SCEVSubexprCollector(SmallPtrSet<const SCEV *, 4> &S) : Subs(S) {}
+
+  template <typename Operands> void visitOperands(Operands operands) {
+    for (auto *Op : operands)
+      visit(Op);
+  }
+  void visitConstant(const SCEVConstant *C) { Subs.insert(C); }
+  void visitUnknown(const SCEVUnknown *U) { Subs.insert(U); }
+  void visitAddExpr(const SCEVAddExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitMulExpr(const SCEVMulExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitAddRecExpr(const SCEVAddRecExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitSMaxExpr(const SCEVSMaxExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitSMinExpr(const SCEVSMinExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitUMinExpr(const SCEVUMinExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitUMaxExpr(const SCEVUMaxExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitMinMaxExpr(const SCEVMinMaxExpr *E) {
+    Subs.insert(E);
+    for (auto *Op : E->operands())
+      visit(Op);
+  }
+  void visitUDivExpr(const SCEVUDivExpr *E) {
+    Subs.insert(E);
+    visit(E->getLHS());
+    visit(E->getRHS());
+  }
+  void visitZeroExtendExpr(const SCEVZeroExtendExpr *E) {
+    Subs.insert(E);
+    visit(E->getOperand());
+  }
+  void visitSignExtendExpr(const SCEVSignExtendExpr *E) {
+    Subs.insert(E);
+    visit(E->getOperand());
+  }
+  void visitTruncateExpr(const SCEVTruncateExpr *E) {
+    Subs.insert(E);
+    visit(E->getOperand());
+  }
+  void visitCouldNotCompute(const SCEVCouldNotCompute *E) { Subs.insert(E); }
+  void visitVScale(const SCEVVScale *E) {
+    Subs.insert(E);
+    visitOperands(E->operands());
+  }
+  void visitPtrToIntExpr(const SCEVPtrToIntExpr *E) {
+    Subs.insert(E);
+    visitOperands(E->operands());
+  }
+  void visitPtrToAddrExpr(const SCEVPtrToAddrExpr *E) {
+    Subs.insert(E);
+    visitOperands(E->operands());
+  }
+  void visitSequentialUMinExpr(const SCEVSequentialUMinExpr *E) {
+    Subs.insert(E);
+    visitOperands(E->operands());
+  }
+};
+} // end namespace
