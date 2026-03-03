@@ -129,7 +129,8 @@ struct VPlanTransforms {
   ///      >[ ]     <-- original loop exit block(s), wrapped in VPIRBasicBlocks.
   LLVM_ABI_FOR_TEST static std::unique_ptr<VPlan>
   buildVPlan0(Loop *TheLoop, LoopInfo &LI, Type *InductionTy, DebugLoc IVDL,
-              PredicatedScalarEvolution &PSE, LoopVersioning *LVer = nullptr);
+              PredicatedScalarEvolution &PSE, LoopAccessInfoManager *LAIs,
+              LoopVersioning *LVer = nullptr);
 
   /// Replace VPPhi recipes in \p Plan's header with corresponding
   /// VPHeaderPHIRecipe subclasses for inductions, reductions, and

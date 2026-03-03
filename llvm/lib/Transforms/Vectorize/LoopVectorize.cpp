@@ -89,6 +89,8 @@
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopIterator.h"
+#include "llvm/Analysis/MemoryLocation.h"
+#include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -8115,7 +8117,7 @@ void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
   // candidates built later for specific VF ranges.
   auto VPlan0 = VPlanTransforms::buildVPlan0(
       OrigLoop, *LI, Legal->getWidestInductionType(),
-      getDebugLocFromInstOrOperands(Legal->getPrimaryInduction()), PSE, &LVer);
+      getDebugLocFromInstOrOperands(Legal->getPrimaryInduction()), PSE, LAIs, &LVer);
 
   // Create recipes for header phis.
   VPlanTransforms::createHeaderPhiRecipes(
@@ -8414,7 +8416,7 @@ VPlanPtr LoopVectorizationPlanner::tryToBuildVPlan(VFRange &Range) {
 
   auto Plan = VPlanTransforms::buildVPlan0(
       OrigLoop, *LI, Legal->getWidestInductionType(),
-      getDebugLocFromInstOrOperands(Legal->getPrimaryInduction()), PSE);
+      getDebugLocFromInstOrOperands(Legal->getPrimaryInduction()), PSE, LAIs);
 
   VPlanTransforms::createHeaderPhiRecipes(
       *Plan, PSE, *OrigLoop, Legal->getInductionVars(),
@@ -8739,7 +8741,8 @@ static bool processLoopInVPlanNativePath(
     TargetLibraryInfo *TLI, DemandedBits *DB, AssumptionCache *AC,
     OptimizationRemarkEmitter *ORE,
     std::function<BlockFrequencyInfo &()> GetBFI, bool OptForSize,
-    LoopVectorizeHints &Hints, LoopVectorizationRequirements &Requirements) {
+    LoopVectorizeHints &Hints, LoopAccessInfoManager *LAIs,
+    LoopVectorizationRequirements &Requirements) {
 
   if (isa<SCEVCouldNotCompute>(PSE.getBackedgeTakenCount())) {
     LLVM_DEBUG(dbgs() << "LV: cannot compute the outer-loop trip count\n");
@@ -8757,8 +8760,8 @@ static bool processLoopInVPlanNativePath(
   // Use the planner for outer loop vectorization.
   // TODO: CM is not used at this point inside the planner. Turn CM into an
   // optional argument if we don't need it in the future.
-  LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, LVL, CM, IAI, PSE, Hints,
-                               ORE);
+  LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, LVL, CM, IAI, PSE, LAIs,
+                               Hints, ORE);
 
   // Get user vectorization factor.
   ElementCount UserVF = Hints.getWidth();
@@ -9525,7 +9528,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   // pipeline.
   if (!L->isInnermost())
     return processLoopInVPlanNativePath(L, PSE, LI, DT, &LVL, TTI, TLI, DB, AC,
-                                        ORE, GetBFI, OptForSize, Hints,
+                                        ORE, GetBFI, OptForSize, Hints, LAIs,
                                         Requirements);
 
   assert(L->isInnermost() && "Inner loop expected.");
@@ -9631,8 +9634,8 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   LoopVectorizationCostModel CM(SEL, L, PSE, LI, &LVL, *TTI, TLI, DB, AC, ORE,
                                 GetBFI, F, &Hints, IAI, OptForSize);
   // Use the planner for vectorization.
-  LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, &LVL, CM, IAI, PSE, Hints,
-                               ORE);
+  LoopVectorizationPlanner LVP(L, LI, DT, TLI, *TTI, &LVL, CM, IAI, PSE, LAIs,
+                               Hints, ORE);
 
   // Get user vectorization factor and interleave count.
   ElementCount UserVF = Hints.getWidth();
@@ -9953,6 +9956,7 @@ PreservedAnalyses LoopVectorizePass::run(Function &F,
   ORE = &AM.getResult<OptimizationRemarkEmitterAnalysis>(F);
   LAIs = &AM.getResult<LoopAccessAnalysis>(F);
   AA = &AM.getResult<AAManager>(F);
+  MSSA = &AM.getResult<MemorySSAAnalysis>(F).getMSSA();
 
   auto &MAMProxy = AM.getResult<ModuleAnalysisManagerFunctionProxy>(F);
   PSI = MAMProxy.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
@@ -10086,3 +10090,131 @@ struct SCEVSubexprCollector : public SCEVVisitor<SCEVSubexprCollector, void> {
   }
 };
 } // end namespace
+
+namespace llvm {
+bool isInvariantLoadHoistable(LoadInst *L, StoreInst *S, const Loop *Loop,
+                                    MemorySSA *MSSA, AAResults *AA,
+                                    ScalarEvolution &SE, const SCEV **StepSCEV,
+                                    SmallVectorImpl<Instruction *> *Instructions) {
+  assert(L != nullptr && S != nullptr);
+  assert(Loop->isLoopInvariant(L->getPointerOperand()));
+
+  if (!MSSA)
+    return false;
+
+  if (L->isVolatile() || S->isVolatile())
+    return false;
+
+  MemoryAccess *MA = MSSA->getMemoryAccess(L);
+  auto QLoc = MemoryLocation::get(L);
+
+  AliasResult AR = AA->alias(MemoryLocation::get(S), QLoc);
+  if (AR != AliasResult::MustAlias)
+    return false;
+
+  // We have the memory PHI, so we know where the backedge is.
+  // We have to find all memory accesses to the same cell.
+  // There should be a single memory use and a single memory def.
+  // The memory use should have MemoryPhi as transitive clobber.
+  // The backedge should have the MemoryDef as a transitive clobber.
+  MemoryAccess *Clobber = MSSA->getWalker()->getClobberingMemoryAccess(MA);
+  while (auto *MD = dyn_cast<MemoryUseOrDef>(Clobber)) {
+    Instruction *DefI = MD->getMemoryInst();
+
+    if (!DefI)
+      return false;
+
+    AliasResult AR = AA->alias(MemoryLocation::get(DefI), QLoc);
+
+    Clobber = MD->getDefiningAccess();
+
+    // We assume runtime aliasing check will be used
+    if (AR == AliasResult::MustAlias)
+      return false;
+  }
+
+  MemoryAccess *MS = MSSA->getMemoryAccess(S);
+  MemoryAccess *StoreClobber = MSSA->getWalker()->getClobberingMemoryAccess(MS);
+  while (true) {
+    if (isa<MemoryPhi>(StoreClobber))
+      break;
+    if (auto *MD = dyn_cast<MemoryUseOrDef>(StoreClobber)) {
+      Instruction *DefI = MD->getMemoryInst();
+
+      if (!DefI)
+        return false;
+
+      AliasResult AR = AA->alias(MemoryLocation::get(DefI), QLoc);
+
+      StoreClobber = MD->getDefiningAccess();
+
+      if (AR == AliasResult::MustAlias)
+        return false;
+    }
+  }
+
+  if (!SE.isSCEVable(S->getValueOperand()->getType()))
+    return false;
+
+  const SCEV *LoadSCEV = SE.getUnknown(L);
+  const SCEV *StoreSCEV = SE.getSCEV(S->getValueOperand());
+
+  const auto *const Step = SE.getMinusSCEV(StoreSCEV, LoadSCEV);
+
+  if (isa<SCEVCouldNotCompute>(Step) || !SE.isLoopInvariant(Step, Loop))
+    return false;
+
+  SmallVector<Instruction *, 4> WL;
+
+  SmallPtrSet<Instruction *, 4> Slice;
+  SmallPtrSet<const SCEV *, 4> Subs;
+  SCEVSubexprCollector Collector(Subs);
+  Collector.visit(StoreSCEV);
+
+  // Register all instructions that matches the SCEV
+  // to allow its removal when hoisting it and
+  // re-expanding the SCEV
+  auto enqueueIfMatches = [&](Value *X) {
+    if (auto *XI = dyn_cast<Instruction>(X)) {
+      const SCEV *SX = SE.getSCEV(XI);
+      if (Subs.contains(SX) && Slice.insert(XI).second)
+        WL.push_back(XI);
+    }
+  };
+
+  enqueueIfMatches(S->getValueOperand());
+
+  while (!WL.empty()) {
+    Instruction *I = WL.pop_back_val();
+
+    for (Value *Op : I->operands()) {
+      if (isa<Constant>(Op) || isa<Argument>(Op))
+        continue;
+      enqueueIfMatches(Op);
+    }
+  }
+
+  auto HasExternalUsers = [S](const SmallPtrSetImpl<Instruction *> &Slice) {
+    for (Instruction *I : Slice)
+      for (Use &U : I->uses())
+        if (auto *UserI = dyn_cast<Instruction>(U.getUser())) {
+          if (isa<DbgInfoIntrinsic>(UserI))
+            continue;
+          if (!Slice.count(UserI) && UserI != S)
+            return true;
+        }
+    return false;
+  };
+
+  if (HasExternalUsers(Slice))
+    return false;
+
+  if (StepSCEV)
+    *StepSCEV = Step;
+
+  if (Instructions)
+    Instructions->insert(Instructions->end(), Slice.begin(), Slice.end());
+
+  return true;
+}
+} // namespace llvm

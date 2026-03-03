@@ -70,13 +70,16 @@ class DemandedBits;
 class DominatorTree;
 class Function;
 class Instruction;
+class LoadInst;
 class Loop;
 class LoopAccessInfoManager;
 class LoopInfo;
+class MemorySSA;
 class OptimizationRemarkEmitter;
 class ProfileSummaryInfo;
 class ScalarEvolution;
 class SCEV;
+class StoreInst;
 class TargetLibraryInfo;
 class TargetTransformInfo;
 
@@ -154,6 +157,7 @@ public:
   OptimizationRemarkEmitter *ORE;
   ProfileSummaryInfo *PSI;
   AAResults *AA;
+  MemorySSA *MSSA;
 
   LLVM_ABI PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
   LLVM_ABI void
@@ -190,6 +194,13 @@ struct ShouldRunExtraVectorPasses
       public AnalysisInfoMixin<ShouldRunExtraVectorPasses> {
   LLVM_ABI static AnalysisKey Key;
 };
+
+/// Analyzes whether an invariant address conflict can be resolved by hoisting
+/// the load and promoting to a scalar IV.
+LLVM_ABI bool isInvariantLoadHoistable(
+    LoadInst *L, StoreInst *S, const Loop *Loop, MemorySSA *MSSA, AAResults *AA,
+    ScalarEvolution &SE, const SCEV **Step = nullptr,
+    SmallVectorImpl<Instruction *> *Instructions = nullptr);
 } // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_VECTORIZE_LOOPVECTORIZE_H
