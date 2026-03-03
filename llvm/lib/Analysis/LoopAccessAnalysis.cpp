@@ -2764,9 +2764,11 @@ bool LoopAccessInfo::analyzeLoop(AAResults *AA, const LoopInfo *LI,
     // See if there is an unsafe dependency between a load to a uniform address and
     // store to the same uniform address.
     if (UniformStores.contains(Ptr)) {
-      LLVM_DEBUG(dbgs() << "LAA: Found an unsafe dependency between a uniform "
-                           "load and uniform store to the same address!\n");
-      HasLoadStoreDependenceInvolvingLoopInvariantAddress = true;
+      if (TheLoop->isLoopInvariant(LD->getPointerOperand())) {
+        LLVM_DEBUG(dbgs() << "LAA: Found an unsafe dependency between a uniform "
+                             "load and uniform store to the same address!\n");
+        HasLoadStoreDependenceInvolvingLoopInvariantAddress = true;
+      }
     }
 
     MemoryLocation Loc = MemoryLocation::get(LD);
