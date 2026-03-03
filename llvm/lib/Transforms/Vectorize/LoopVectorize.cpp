@@ -7657,6 +7657,14 @@ BasicBlock *EpilogueVectorizerEpilogueLoop::createVectorizedLoopSkeleton() {
   OriginalScalarPH->setName("vec.epilog.iter.check");
   VPIRBasicBlock *NewEntry = Plan.createVPIRBasicBlock(OriginalScalarPH);
   VPBasicBlock *OldEntry = Plan.getEntry();
+
+  for (VPRecipeBase &R : make_early_inc_range(*OldEntry))
+    // Move hoisted loads to split PreHeader
+    if (auto RepR = dyn_cast<VPReplicateRecipe>(&R)) {
+      RepR->removeFromParent();
+      VectorPHVPBB->appendRecipe(RepR);
+    }
+
   for (auto &R : make_early_inc_range(*OldEntry)) {
     // Skip moving VPIRInstructions (including VPIRPhis), which are unmovable by
     // defining.
