@@ -95,6 +95,17 @@ struct deferredval_ty {
 /// whichever value m_VPValue(X) populated.
 inline deferredval_ty m_Deferred(VPValue *const &V) { return V; }
 
+template <typename SubT> struct RecipeBindValue {
+  SubT Sub;
+  VPValue *&Out;
+  bool match(const VPValue *V) const {
+    if (!Sub.match(V))
+      return false;
+    Out = const_cast<VPValue *>(V);
+    return true;
+  }
+};
+
 /// Match an integer constant if Pred::isValue returns true for the APInt. \p
 /// BitWidth optionally specifies the bitwidth the matched constant must have.
 /// If it is 0, the matched constant can have any bitwidth.
@@ -331,6 +342,10 @@ struct Recipe_match {
            all_of_tuple_elements(IdxSeq, [R](auto Op, unsigned Idx) {
              return Op.match(R->getOperand(R->getNumOperands() - Idx - 1));
            });
+  }
+
+  auto bind(VPValue *&Out) const & {
+    return RecipeBindValue<decltype(*this)>{*this, Out};
   }
 
 private:

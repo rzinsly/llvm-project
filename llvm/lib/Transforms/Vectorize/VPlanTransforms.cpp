@@ -3359,7 +3359,7 @@ void VPlanTransforms::convertEVLExitCond(VPlan &Plan) {
   // Bail if not an EVL tail folded loop.
   VPValue *AVL;
   if (!match(EVLPhi->getBackedgeValue(),
-             m_c_Add(m_ZExtOrSelf(m_EVL(m_VPValue(AVL))), m_Specific(EVLPhi))))
+             m_c_Add(m_ZExtOrSelf(m_EVL(m_VPValue(AVL)).bind(EVL)), m_Specific(EVLPhi))))
     return;
 
   // The AVL may be capped to a safe distance.
