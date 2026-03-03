@@ -30,6 +30,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
+#include "llvm/Transforms/Vectorize/LoopVectorize.h"
 
 #define DEBUG_TYPE "vplan"
 
@@ -37,6 +38,15 @@ using namespace llvm;
 using namespace VPlanPatternMatch;
 
 namespace {
+
+struct ScalarPromotionInfo {
+  LoadInst *Load;
+  StoreInst *Store;
+  const SCEV *Step = nullptr;
+
+  SmallVector<Instruction *, 1> Instructions;
+};
+
 // Class that is used to build the plain CFG for the incoming IR.
 class PlainCFGBuilder {
   // The outermost loop of the input loop nest considered for vectorization.
@@ -73,6 +83,8 @@ class PlainCFGBuilder {
   // Hold phi node's that need to be fixed once the plain CFG has been built.
   SmallVector<PHINode *, 8> PhisToFix;
 
+  SmallVector<ScalarPromotionInfo, 2> ScalarPromotions;
+
   // Utility functions.
   void setVPBBPredsFromBB(VPBasicBlock *VPBB, BasicBlock *BB);
   void fixHeaderPhis();
@@ -82,6 +94,8 @@ class PlainCFGBuilder {
 #endif
   VPValue *getOrCreateVPOperand(Value *IRVal);
   void createVPInstructionsForVPBB(VPBasicBlock *VPBB, BasicBlock *BB);
+
+  void analyzeScalarPromotion(VPBasicBlock *VPBB, BasicBlock *BB);
 
 public:
   PlainCFGBuilder(Loop *Lp, LoopInfo *LI, LoopVersioning *LVer,
@@ -186,6 +200,30 @@ VPValue *PlainCFGBuilder::getOrCreateVPOperand(Value *IRVal) {
   VPValue *NewVPVal = Plan->getOrAddLiveIn(IRVal);
   IRDef2VPValue[IRVal] = NewVPVal;
   return NewVPVal;
+}
+
+void PlainCFGBuilder::analyzeScalarPromotion(VPBasicBlock *VPBB,
+                                             BasicBlock *BB) {
+  auto *Loop = LI->getLoopFor(BB);
+  if (!Loop)
+    return;
+
+  auto &LAI = LAIs->getInfo(*Loop);
+  auto *SE = PSE->getSE();
+  for (const auto &[Load, Store] : LAI.getInvariantAddressConflicts()) {
+    if (Load->getParent() != BB)
+      continue;
+
+    const SCEV *Step = nullptr;
+    SmallVector<Instruction *, 4> Is;
+
+    if (isInvariantLoadHoistable(Load, Store, Loop, MSSA, AA, *SE, &Step,
+                                 &Is)) {
+      ScalarPromotions.push_back(ScalarPromotionInfo{Load, Store, Step, {}});
+      ScalarPromotions.back().Instructions.insert(
+          ScalarPromotions.back().Instructions.end(), Is.begin(), Is.end());
+    }
+  }
 }
 
 // Create new VPInstructions in a VPBasicBlock, given its BasicBlock
@@ -326,6 +364,8 @@ std::unique_ptr<VPlan> PlainCFGBuilder::buildPlainCFG() {
     VPBasicBlock *VPBB = getOrCreateVPBB(BB);
     // Set VPBB predecessors in the same order as they are in the incoming BB.
     setVPBBPredsFromBB(VPBB, BB);
+
+    analyzeScalarPromotion(VPBB, BB);
 
     // Create VPInstructions for BB.
     createVPInstructionsForVPBB(VPBB, BB);
