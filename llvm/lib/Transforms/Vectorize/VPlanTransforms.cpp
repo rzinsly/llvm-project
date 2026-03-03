@@ -3358,6 +3358,7 @@ void VPlanTransforms::convertEVLExitCond(VPlan &Plan) {
 
   // Bail if not an EVL tail folded loop.
   VPValue *AVL;
+  VPValue *EVL;
   if (!match(EVLPhi->getBackedgeValue(),
              m_c_Add(m_ZExtOrSelf(m_EVL(m_VPValue(AVL)).bind(EVL)), m_Specific(EVLPhi))))
     return;
@@ -3390,6 +3391,40 @@ void VPlanTransforms::convertEVLExitCond(VPlan &Plan) {
   VPBuilder Builder(LatchBr);
   LatchBr->setOperand(0, Builder.createICmp(CmpInst::ICMP_EQ, AVLNext,
                                             Plan.getConstantInt(AVLTy, 0)));
+
+  SmallVector<VPRecipeBase *> RecipesToErase;
+  for (VPBasicBlock *VPBB : VPBlockUtils::blocksOnly<VPBasicBlock>(
+           vp_depth_first_shallow(Plan.getEntry()))) {
+    for (VPRecipeBase &R : *VPBB)
+      if (auto *ScalarIV = dyn_cast<VPScalarIVPromotionRecipe>(&R)) {
+        auto ScalarTy =
+            VPTypeAnalysis(Plan).inferScalarType(ScalarIV->getOperand(1));
+        auto EVLTy = VPTypeAnalysis(Plan).inferScalarType(EVL);
+        auto CompEVL = VPBuilder(ScalarIV).createScalarZExtOrTrunc(
+            EVL, ScalarTy, EVLTy, ScalarIV->getDebugLoc());
+
+        auto Phi = VPBuilder(VPBB, VPBB->getFirstNonPhi())
+                       .createScalarPhi({ScalarIV->getOperand(0)},
+                                        ScalarIV->getDebugLoc());
+
+        auto Mul = VPBuilder(ScalarIV).createNaryOp(
+            Instruction::Mul, {ScalarIV->getOperand(1), CompEVL});
+        auto Add =
+            VPBuilder(ScalarIV).createNaryOp(Instruction::Add, {Phi, Mul});
+
+        VPBuilder(ScalarIV).createNaryOp(Instruction::Store,
+                                         {Add, ScalarIV->getOperand(2)});
+
+        Phi->addOperand(Add);
+
+        ScalarIV->replaceAllUsesWith(Add);
+        RecipesToErase.push_back(ScalarIV);
+      }
+  }
+
+  for (auto &Recipe : RecipesToErase) {
+    Recipe->eraseFromParent();
+  }
 }
 
 void VPlanTransforms::replaceSymbolicStrides(

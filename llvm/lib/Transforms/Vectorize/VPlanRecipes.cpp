@@ -37,6 +37,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
 #include <cassert>
 
 using namespace llvm;
@@ -582,6 +583,12 @@ Value *VPInstruction::generate(VPTransformState &State) {
   }
   case Instruction::PHI: {
     llvm_unreachable("should be handled by VPPhi::execute");
+  }
+  case Instruction::Store: {
+    assert(vputils::onlyFirstLaneUsed(this) && "Should be scalar store");
+    Value *V = State.get(getOperand(0), true);
+    Value *P = State.get(getOperand(1), true);
+    return Builder.CreateStore(V, P);
   }
   case Instruction::Select: {
     bool OnlyFirstLaneUsed = vputils::onlyFirstLaneUsed(this);
@@ -1366,7 +1373,8 @@ bool VPInstruction::opcodeMayReadOrWriteFromMemory() const {
 
 bool VPInstruction::usesFirstLaneOnly(const VPValue *Op) const {
   assert(is_contained(operands(), Op) && "Op must be an operand of the recipe");
-  if (Instruction::isBinaryOp(getOpcode()) || Instruction::isCast(getOpcode()))
+  if (Instruction::isBinaryOp(getOpcode()) ||
+      Instruction::isCast(getOpcode()) || getOpcode() == Instruction::Store)
     return vputils::onlyFirstLaneUsed(this);
 
   switch (getOpcode()) {
